@@ -1,11 +1,12 @@
-use std::rc::Rc;
-use std::cell::{Ref, RefCell};
+use std::fmt;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-
+use std::mem;
+use std::rc::Rc;
 
 type Node = Rc<RefCell<Variable>>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 struct Variable {
     identifier: String,
     // Each variable should be able to have its own set of possible states. For
@@ -18,6 +19,29 @@ struct Variable {
     // parent states to probabilities.
     table: HashMap<Vec<u8>, Vec<f64>>,
 }
+
+impl fmt::Debug for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        try!(write!(f,
+                    "Variable {{ identifier: {:?}, states: {:?}, ",
+                    self.identifier,
+                    self.states));
+        let shallow_parents = self.parents
+                                  .iter()
+                                  .map(|rc| format!("{:p}", rc))
+                                  .collect::<Vec<_>>();
+        let shallow_children = self.children
+                                   .iter()
+                                   .map(|rc| format!("{:p}", rc))
+                                   .collect::<Vec<_>>();
+        try!(write!(f,
+                    "parents: {:?}, children: {:?}, ",
+                    shallow_parents,
+                    shallow_children));
+        write!(f, "table: {:?} }}", self.table)
+    }
+}
+
 
 impl Variable {
     fn new(identifier: &str) -> Node {
@@ -201,6 +225,15 @@ mod test {
         let network = rain_sprinker_example();
         let rain = network.get_variable("rain").unwrap();
         assert_eq!("rain", rain.borrow().identifier);
+    }
+
+    #[test]
+    fn concerning_cyclic_datastructures_in_this_programming_language() {
+        let pain = Variable::new("pain");
+        let sadness = Variable::new("sadness");
+        pain.borrow_mut().children.push(sadness.clone());
+        sadness.borrow_mut().parents.push(pain.clone());
+        println!("{:?}", pain);
     }
 
     #[test]
