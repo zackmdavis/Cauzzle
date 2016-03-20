@@ -1,0 +1,6 @@
+max_width = 79
+verbose = true
+reorder_imports = true
+report_todo = "Never"
+fn_args_density = "Compressed"
+fn_arg_indent = "Tabbed"
