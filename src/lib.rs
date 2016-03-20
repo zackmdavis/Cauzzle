@@ -1,101 +1,96 @@
-use std::fmt;
+use std::cmp;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::mem;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-type Node = Rc<RefCell<Variable>>;
 
-#[derive(Clone, PartialEq)]
 struct Variable {
     identifier: String,
     // Each variable should be able to have its own set of possible states. For
     // the moment, just use an opaque byte, because we should get the basics
     // down before we take on the struggle of wrangling trait objects.
     states: Vec<u8>,
-    parents: Vec<Node>,
-    children: Vec<Node>,
+    parents: RefCell<Vec<Weak<Variable>>>,
+    children: RefCell<Vec<Rc<Variable>>>,
     // The conditional probability table is represented as a map of a vector of
     // parent states to probabilities.
-    table: HashMap<Vec<u8>, Vec<f64>>,
+    table: RefCell<HashMap<Vec<u8>, Vec<f64>>>,
 }
-
-impl fmt::Debug for Variable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        try!(write!(f,
-                    "Variable {{ identifier: {:?}, states: {:?}, ",
-                    self.identifier,
-                    self.states));
-        let shallow_parents = self.parents
-                                  .iter()
-                                  .map(|rc| format!("{:p}", rc))
-                                  .collect::<Vec<_>>();
-        let shallow_children = self.children
-                                   .iter()
-                                   .map(|rc| format!("{:p}", rc))
-                                   .collect::<Vec<_>>();
-        try!(write!(f,
-                    "parents: {:?}, children: {:?}, ",
-                    shallow_parents,
-                    shallow_children));
-        write!(f, "table: {:?} }}", self.table)
-    }
-}
-
 
 impl Variable {
-    fn new(identifier: &str) -> Node {
-        Rc::new(RefCell::new(Variable {
+    fn create(identifier: &str, states: &[u8]) -> Rc<Variable> {
+        Rc::new(Variable {
             identifier: identifier.to_owned(),
-            states: Vec::new(),
-            parents: Vec::new(),
-            children: Vec::new(),
-            table: HashMap::new(),
-        }))
+            states: states.to_vec(),
+            parents: RefCell::new(Vec::new()),
+            children: RefCell::new(Vec::new()),
+            table: RefCell::new(HashMap::new()),
+        })
     }
 
-    fn paths_to(&self, other: Node) -> Vec<Path> {
+    fn paths_to(&self, other: Rc<Variable>) -> Vec<Path> {
         vec![Path(Vec::new())] // TODO!
     }
 
-    fn collect_descendants(&self, descendants: &mut Vec<Node>) {
-        for child in &self.children {
+    fn collect_descendants(&self, descendants: &mut Vec<Rc<Variable>>) {
+        for child in self.children.borrow().iter() {
             if !descendants.contains(child) {
                 descendants.push(child.clone());
-                child.borrow().collect_descendants(descendants);
+                child.collect_descendants(descendants);
             }
         }
     }
 
-    pub fn descendants(&self) -> Vec<Node> {
+    pub fn descendants(&self) -> Vec<Rc<Variable>> {
         let mut descendants = Vec::new();
         self.collect_descendants(&mut descendants);
         descendants
     }
 
-    pub fn d_separated_from(&self, other: Node, givens: &[Node]) -> bool {
+    pub fn d_separated_from(&self, other: Rc<Variable>,
+        givens: &[Rc<Variable>])
+                            -> bool {
         let paths = self.paths_to(other);
         paths.iter().any(|ref p| p.d_separated(givens))
     }
 }
 
-#[derive(Clone)]
-struct Network(Vec<Node>);
-
-impl Network {
-    pub fn new(nodes: &[Node]) -> Self {
-        Network(nodes.iter().cloned().collect::<Vec<Node>>())
-    }
-
-    pub fn get_variable(&self, identifier: &str) -> Option<&Node> {
-        self.0
-            .iter()
-            .skip_while(|&n| n.borrow().identifier != identifier)
-            .next()
+impl cmp::PartialEq for Variable {
+    fn eq(&self, other: &Variable) -> bool {
+        self.identifier == other.identifier
     }
 }
 
-struct Path(Vec<Node>);
+impl fmt::Debug for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f,
+               "Variable {{ identifier: {:?}, states: {:?}, \
+                parents: (omitted), children: (omitted), \
+                table: (omitted) }}",
+               self.identifier,
+               self.states)
+    }
+}
+
+
+#[derive(Clone, Debug)]
+struct Network(Vec<Rc<Variable>>);
+
+impl Network {
+    pub fn new(nodes: &[Rc<Variable>]) -> Self {
+        Network(nodes.iter().cloned().collect::<Vec<Rc<Variable>>>())
+    }
+
+    pub fn get_variable(&self, identifier: &str) -> Option<Rc<Variable>> {
+        self.0
+            .iter()
+            .skip_while(|&n| n.identifier != identifier)
+            .next()
+            .cloned()
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 enum SegmentTopology {
@@ -106,63 +101,48 @@ enum SegmentTopology {
 
 #[derive(Clone, Debug)]
 struct Segment {
-    nodes: (Node, Node, Node),
+    nodes: (Rc<Variable>, Rc<Variable>, Rc<Variable>),
     topology: SegmentTopology,
 }
 
 impl Segment {
-    fn center_in_givens(&self, givens: &[Node]) -> bool {
-        givens.contains(&self.nodes.1)
-    }
-
-    fn center_descendant_in_givens(&self, givens: &[Node]) -> bool {
-        for descendant in self.nodes.1.borrow().descendants() {
-            if givens.contains(&descendant) {
-                return true;
-            }
-        }
-        false
-    }
-}
-
-impl From<Path> for Segment {
-    fn from(path: Path) -> Self {
-        if path.0.len() != 3 {
+    fn new(subpath: &[Rc<Variable>]) -> Self {
+        if subpath.len() != 3 {
             panic!("a segment must have exactly three nodes");
         }
 
-        if path.0[0].borrow().children.contains(&path.0[1]) {
-            if path.0[1].borrow().children.contains(&path.0[2]) {
+        if subpath[0].children.borrow().contains(&subpath[1]) {
+            if subpath[1].children.borrow().contains(&subpath[2]) {
                 Segment {
-                    nodes: (path.0[0].clone(),
-                            path.0[1].clone(),
-                            path.0[2].clone()),
+                    nodes: (subpath[0].clone(),
+                            subpath[1].clone(),
+                            subpath[2].clone()),
                     topology: SegmentTopology::Chain,
                 }
-            } else if path.0[1].borrow().parents.contains(&path.0[2]) {
+            } else if subpath[2].children.borrow().contains(&subpath[1]) {
                 Segment {
-                    nodes: (path.0[0].clone(),
-                            path.0[1].clone(),
-                            path.0[2].clone()),
+                    nodes: (subpath[0].clone(),
+                            subpath[1].clone(),
+                            subpath[2].clone()),
                     topology: SegmentTopology::Collider,
                 }
             } else {
                 panic!("expected parent-child relation for adjacent segment \
                         nodes");
             }
-        } else if path.0[0].borrow().parents.contains(&path.0[1]) {
-            if path.0[1].borrow().children.contains(&path.0[2]) {
+        } else if subpath[1].children.borrow().contains(&subpath[0]) {
+            if subpath[1].children.borrow().contains(&subpath[2]) {
                 Segment {
-                    nodes: (path.0[0].clone(),
-                            path.0[1].clone(),
-                            path.0[2].clone()),
+                    nodes: (subpath[0].clone(),
+                            subpath[1].clone(),
+                            subpath[2].clone()),
                     topology: SegmentTopology::Fork,
                 }
-            } else if path.0[1].borrow().parents.contains(&path.0[2]) {
+            } else if subpath[2].children.borrow().contains(&subpath[1]) {
                 Segment {
-                    nodes: (path.0[0].clone(),
-                            path.0[1].clone(),
-                            path.0[2].clone()),
+                    nodes: (subpath[0].clone(),
+                            subpath[1].clone(),
+                            subpath[2].clone()),
                     topology: SegmentTopology::Chain,
                 }
 
@@ -176,12 +156,28 @@ impl From<Path> for Segment {
         }
 
     }
+
+    fn center_in_givens(&self, givens: &[Rc<Variable>]) -> bool {
+        givens.contains(&self.nodes.1)
+    }
+
+    fn center_descendant_in_givens(&self, givens: &[Rc<Variable>]) -> bool {
+        for descendant in self.nodes.1.descendants() {
+            if givens.contains(&descendant) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
+#[derive(Debug)]
+struct Path(Vec<Rc<Variable>>);
+
 impl Path {
-    fn d_separated(&self, givens: &[Node]) -> bool {
+    fn d_separated(&self, givens: &[Rc<Variable>]) -> bool {
         for window in self.0.windows(3) {
-            let segment = Segment::from(Path(window.to_vec()));
+            let segment = Segment::new(window);
             match segment.topology {
                 SegmentTopology::Chain | SegmentTopology::Fork => {
                     if segment.center_in_givens(givens) {
@@ -206,11 +202,11 @@ mod test {
 
     // the example network from _Causality_ §1.2
     fn rain_sprinker_example() -> Network {
-        let season = Variable::new("season");
-        let sprinkler = Variable::new("sprinkler");
-        let rain = Variable::new("rain");
-        let wet = Variable::new("wet");
-        let slippery = Variable::new("slippery");
+        let season = Variable::create("season", &[1, 2, 3, 4]);
+        let sprinkler = Variable::create("sprinkler", &[0, 1]);
+        let rain = Variable::create("rain", &[1, 2, 3]);
+        let wet = Variable::create("wet", &[1, 2, 3]);
+        let slippery = Variable::create("slippery", &[1, 2, 3]);
         let nodes = vec![season.clone(),
                          rain.clone(),
                          sprinkler.clone(),
@@ -224,16 +220,7 @@ mod test {
     fn concerning_getting_a_variable() {
         let network = rain_sprinker_example();
         let rain = network.get_variable("rain").unwrap();
-        assert_eq!("rain", rain.borrow().identifier);
-    }
-
-    #[test]
-    fn concerning_cyclic_datastructures_in_this_programming_language() {
-        let pain = Variable::new("pain");
-        let sadness = Variable::new("sadness");
-        pain.borrow_mut().children.push(sadness.clone());
-        sadness.borrow_mut().parents.push(pain.clone());
-        println!("{:?}", pain);
+        assert_eq!("rain", rain.identifier);
     }
 
     #[test]
