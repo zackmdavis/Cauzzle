@@ -2,6 +2,7 @@ use std::rc::Rc;
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 
+
 type Node = Rc<RefCell<Variable>>;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,7 +20,7 @@ struct Variable {
 }
 
 impl Variable {
-    fn new(identifier: &str) -> Rc<RefCell<Self>> {
+    fn new(identifier: &str) -> Node {
         Rc::new(RefCell::new(Variable {
             identifier: identifier.to_owned(),
             states: Vec::new(),
@@ -51,6 +52,22 @@ impl Variable {
     pub fn d_separated_from(&self, other: Node, givens: &[Node]) -> bool {
         let paths = self.paths_to(other);
         paths.iter().any(|ref p| p.d_separated(givens))
+    }
+}
+
+#[derive(Clone)]
+struct Network(Vec<Node>);
+
+impl Network {
+    pub fn new(nodes: &[Node]) -> Self {
+        Network(nodes.iter().cloned().collect::<Vec<Node>>())
+    }
+
+    pub fn get_variable(&self, identifier: &str) -> Option<&Node> {
+        self.0
+            .iter()
+            .skip_while(|&n| n.borrow().identifier != identifier)
+            .next()
     }
 }
 
@@ -161,6 +178,32 @@ impl Path {
 
 #[cfg(test)]
 mod test {
+    use super::{Network, Variable};
+
+    // the example network from _Causality_ §1.2
+    fn rain_sprinker_example() -> Network {
+        let season = Variable::new("season");
+        let sprinkler = Variable::new("sprinkler");
+        let rain = Variable::new("rain");
+        let wet = Variable::new("wet");
+        let slippery = Variable::new("slippery");
+        let nodes = vec![season.clone(),
+                         rain.clone(),
+                         sprinkler.clone(),
+                         wet.clone(),
+                         slippery.clone()];
+        let network = Network::new(&nodes);
+        network
+    }
+
+    #[test]
+    fn concerning_getting_a_variable() {
+        let network = rain_sprinker_example();
+        let rain = network.get_variable("rain").unwrap();
+        assert_eq!("rain", rain.borrow().identifier);
+    }
+
     #[test]
     fn concerning_tests_that_have_yet_to_be_written() {}
+
 }
