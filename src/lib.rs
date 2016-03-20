@@ -2,6 +2,8 @@ use std::rc::Rc;
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 
+type Node = Rc<RefCell<Variable>>;
+
 #[derive(Debug, Clone, PartialEq)]
 struct Variable {
     identifier: String,
@@ -9,8 +11,8 @@ struct Variable {
     // the moment, just use an opaque byte, because we should get the basics
     // down before we take on the struggle of wrangling trait objects.
     states: Vec<u8>,
-    parents: Vec<Rc<RefCell<Variable>>>,
-    children: Vec<Rc<RefCell<Variable>>>,
+    parents: Vec<Node>,
+    children: Vec<Node>,
     // The conditional probability table is represented as a map of a vector of
     // parent states to probabilities.
     table: HashMap<Vec<u8>, Vec<f64>>,
@@ -27,11 +29,11 @@ impl Variable {
         }))
     }
 
-    fn paths_to(&self, other: Rc<RefCell<Variable>>) -> Vec<Path> {
+    fn paths_to(&self, other: Node) -> Vec<Path> {
         vec![Path(Vec::new())] // TODO!
     }
 
-    fn collect_descendants(&self, descendants: &mut Vec<Rc<RefCell<Variable>>>) {
+    fn collect_descendants(&self, descendants: &mut Vec<Node>) {
         for child in &self.children {
             if !descendants.contains(child) {
                 descendants.push(child.clone());
@@ -40,29 +42,25 @@ impl Variable {
         }
     }
 
-    pub fn descendants(&self) -> Vec<Rc<RefCell<Variable>>> {
+    pub fn descendants(&self) -> Vec<Node> {
         let mut descendants = Vec::new();
         self.collect_descendants(&mut descendants);
         descendants
     }
 
-    fn d_separated_from(&self, other: Rc<RefCell<Variable>>,
-        givens: &[Rc<RefCell<Variable>>])
-                        -> bool {
+    fn d_separated_from(&self, other: Node, givens: &[Node]) -> bool {
         let paths = self.paths_to(other);
         paths.iter().any(|ref p| p.d_separated(givens))
     }
 }
 
-struct Path(Vec<Rc<RefCell<Variable>>>);
+struct Path(Vec<Node>);
 
 
 enum Segment {
-    Chain(Rc<RefCell<Variable>>, Rc<RefCell<Variable>>, Rc<RefCell<Variable>>),
-    Fork(Rc<RefCell<Variable>>, Rc<RefCell<Variable>>, Rc<RefCell<Variable>>),
-    Collider(Rc<RefCell<Variable>>,
-             Rc<RefCell<Variable>>,
-             Rc<RefCell<Variable>>),
+    Chain(Node, Node, Node),
+    Fork(Node, Node, Node),
+    Collider(Node, Node, Node),
 }
 
 impl From<Path> for Segment {
@@ -107,7 +105,7 @@ impl From<Path> for Segment {
 }
 
 impl Path {
-    fn d_separated(&self, givens: &[Rc<RefCell<Variable>>]) -> bool {
+    fn d_separated(&self, givens: &[Node]) -> bool {
         for window in self.0.windows(3) {
             let segment = Segment::from(Path(window.to_vec()));
             // TODO
