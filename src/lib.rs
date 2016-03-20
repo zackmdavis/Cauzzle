@@ -48,7 +48,7 @@ impl Variable {
         descendants
     }
 
-    fn d_separated_from(&self, other: Node, givens: &[Node]) -> bool {
+    pub fn d_separated_from(&self, other: Node, givens: &[Node]) -> bool {
         let paths = self.paths_to(other);
         paths.iter().any(|ref p| p.d_separated(givens))
     }
@@ -56,11 +56,32 @@ impl Variable {
 
 struct Path(Vec<Node>);
 
+#[derive(Clone, Copy, Debug)]
+enum SegmentTopology {
+    Chain,
+    Fork,
+    Collider,
+}
 
-enum Segment {
-    Chain(Node, Node, Node),
-    Fork(Node, Node, Node),
-    Collider(Node, Node, Node),
+#[derive(Clone, Debug)]
+struct Segment {
+    nodes: (Node, Node, Node),
+    topology: SegmentTopology,
+}
+
+impl Segment {
+    fn center_in_givens(&self, givens: &[Node]) -> bool {
+        givens.contains(&self.nodes.1)
+    }
+
+    fn center_descendant_in_givens(&self, givens: &[Node]) -> bool {
+        for descendant in self.nodes.1.borrow().descendants() {
+            if givens.contains(&descendant) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl From<Path> for Segment {
@@ -71,26 +92,38 @@ impl From<Path> for Segment {
 
         if path.0[0].borrow().children.contains(&path.0[1]) {
             if path.0[1].borrow().children.contains(&path.0[2]) {
-                Segment::Chain(path.0[0].clone(),
-                               path.0[1].clone(),
-                               path.0[2].clone())
+                Segment {
+                    nodes: (path.0[0].clone(),
+                            path.0[1].clone(),
+                            path.0[2].clone()),
+                    topology: SegmentTopology::Chain,
+                }
             } else if path.0[1].borrow().parents.contains(&path.0[2]) {
-                Segment::Collider(path.0[0].clone(),
-                                  path.0[1].clone(),
-                                  path.0[2].clone())
+                Segment {
+                    nodes: (path.0[0].clone(),
+                            path.0[1].clone(),
+                            path.0[2].clone()),
+                    topology: SegmentTopology::Collider,
+                }
             } else {
                 panic!("expected parent-child relation for adjacent segment \
                         nodes");
             }
         } else if path.0[0].borrow().parents.contains(&path.0[1]) {
             if path.0[1].borrow().children.contains(&path.0[2]) {
-                Segment::Fork(path.0[0].clone(),
-                              path.0[1].clone(),
-                              path.0[2].clone())
+                Segment {
+                    nodes: (path.0[0].clone(),
+                            path.0[1].clone(),
+                            path.0[2].clone()),
+                    topology: SegmentTopology::Fork,
+                }
             } else if path.0[1].borrow().parents.contains(&path.0[2]) {
-                Segment::Chain(path.0[0].clone(),
-                               path.0[1].clone(),
-                               path.0[2].clone())
+                Segment {
+                    nodes: (path.0[0].clone(),
+                            path.0[1].clone(),
+                            path.0[2].clone()),
+                    topology: SegmentTopology::Chain,
+                }
 
             } else {
                 panic!("expected parent-child relation for adjacent segment \
@@ -108,9 +141,21 @@ impl Path {
     fn d_separated(&self, givens: &[Node]) -> bool {
         for window in self.0.windows(3) {
             let segment = Segment::from(Path(window.to_vec()));
-            // TODO
+            match segment.topology {
+                SegmentTopology::Chain | SegmentTopology::Fork => {
+                    if segment.center_in_givens(givens) {
+                        return true;
+                    }
+                }
+                SegmentTopology::Collider => {
+                    if !segment.center_in_givens(givens) &&
+                       !segment.center_descendant_in_givens(givens) {
+                        return true;
+                    }
+                }
+            }
         }
-        false // TODO
+        false
     }
 }
 
