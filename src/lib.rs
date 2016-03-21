@@ -260,7 +260,7 @@ impl fmt::Display for Path {
             let arrow = if one.children.borrow().contains(&other) {
                 "→" // \u{2192} RIGHTWARDS ARROW
             } else {
-                "←" // \u{2190} RIGHTWARDS ARROW
+                "←" // \u{2190} LEFTWARDS ARROW
             };
 
             if i == 0 {
