@@ -67,10 +67,15 @@ impl fmt::Debug for Variable {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f,
                "Variable {{ identifier: {:?}, states: {:?}, \
-                parents: (omitted), children: (omitted), \
+                parents: (omitted), children: {:?}, \
                 table: (omitted) }}",
                self.identifier,
-               self.states)
+               self.states,
+               self.children
+                   .borrow()
+                   .iter()
+                   .map(|c| &c.identifier)
+                   .collect::<Vec<_>>())
     }
 }
 
@@ -89,6 +94,15 @@ impl Network {
             .skip_while(|&n| n.identifier != identifier)
             .next()
             .cloned()
+    }
+
+    pub fn link(&self, parent_identifier: &str, child_identifier: &str) {
+        let parent = self.get_variable(parent_identifier)
+                         .expect("can't link variable absent from network");
+        let child = self.get_variable(child_identifier)
+                        .expect("can't link variable absent from network");
+        parent.children.borrow_mut().push(child.clone());
+        child.parents.borrow_mut().push(Rc::downgrade(&parent));
     }
 }
 
@@ -212,7 +226,14 @@ mod test {
                          sprinkler.clone(),
                          wet.clone(),
                          slippery.clone()];
+
         let network = Network::new(&nodes);
+        network.link("season", "sprinkler");
+        network.link("season", "rain");
+        network.link("sprinkler", "wet");
+        network.link("rain", "wet");
+        network.link("wet", "slippery");
+
         network
     }
 
@@ -224,6 +245,23 @@ mod test {
     }
 
     #[test]
-    fn concerning_tests_that_have_yet_to_be_written() {}
+    fn concerning_linkage() {
+        let network = rain_sprinker_example();
+        let season = network.get_variable("season").unwrap();
+        assert_eq!(vec!["sprinkler", "rain"],
+                   season.children
+                         .borrow()
+                         .iter()
+                         .map(|v| &v.identifier)
+                         .collect::<Vec<_>>());
+        for child in season.children.borrow().iter() {
+            assert_eq!("wet", &child.children.borrow()[0].identifier);
+            assert_eq!("season",
+                       &child.parents.borrow()[0]
+                            .upgrade()
+                            .unwrap()
+                            .identifier);
+        }
+    }
 
 }
