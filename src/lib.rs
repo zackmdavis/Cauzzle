@@ -1,6 +1,6 @@
 use std::cmp;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::mem;
 use std::rc::{Rc, Weak};
@@ -19,6 +19,7 @@ struct Variable {
     table: RefCell<HashMap<Vec<u8>, Vec<f64>>>,
 }
 
+// implements PartialEq, Debug
 impl Variable {
     fn create(identifier: &str, states: &[u8]) -> Rc<Variable> {
         Rc::new(Variable {
@@ -28,10 +29,6 @@ impl Variable {
             children: RefCell::new(Vec::new()),
             table: RefCell::new(HashMap::new()),
         })
-    }
-
-    fn paths_to(&self, other: Rc<Variable>) -> Vec<Path> {
-        vec![Path(Vec::new())] // TODO!
     }
 
     fn collect_descendants(&self, descendants: &mut Vec<Rc<Variable>>) {
@@ -47,13 +44,6 @@ impl Variable {
         let mut descendants = Vec::new();
         self.collect_descendants(&mut descendants);
         descendants
-    }
-
-    pub fn d_separated_from(&self, other: Rc<Variable>,
-        givens: &[Rc<Variable>])
-                            -> bool {
-        let paths = self.paths_to(other);
-        paths.iter().any(|ref p| p.d_separated(givens))
     }
 }
 
@@ -79,7 +69,6 @@ impl fmt::Debug for Variable {
     }
 }
 
-
 #[derive(Clone, Debug)]
 struct Network(Vec<Rc<Variable>>);
 
@@ -103,6 +92,48 @@ impl Network {
                         .expect("can't link variable absent from network");
         parent.children.borrow_mut().push(child.clone());
         child.parents.borrow_mut().push(Rc::downgrade(&parent));
+    }
+
+    fn collect_paths(at: Rc<Variable>, to: Rc<Variable>,
+        mut journey: Vec<Rc<Variable>>, paths: &mut Vec<Path>) {
+        for step in journey.iter() {
+            if at == *step {
+                // going in circles ...
+                return;
+            }
+        }
+
+        journey.push(at.clone());
+
+        if at == to {
+            // found it!
+            paths.push(Path(journey.clone()));
+            return;
+        }
+
+        for child in at.children.borrow().iter() {
+            Network::collect_paths(child.clone(),
+                                   to.clone(),
+                                   journey.clone(),
+                                   paths);
+        }
+        for weak_parent in at.parents.borrow().iter() {
+            let parent = weak_parent.upgrade().unwrap();
+            Network::collect_paths(parent.clone(),
+                                   to.clone(),
+                                   journey.clone(),
+                                   paths);
+        }
+
+    }
+
+    pub fn paths(&self, start_identifier: &str, end_identifier: &str)
+                 -> Vec<Path> {
+        let mut paths = Vec::new();
+        let start = self.get_variable(start_identifier).unwrap();
+        let end = self.get_variable(end_identifier).unwrap();
+        Network::collect_paths(start, end, vec![], &mut paths);
+        paths
     }
 }
 
@@ -210,6 +241,32 @@ impl Path {
     }
 }
 
+impl fmt::Display for Path {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        for (i, window) in self.0.windows(2).enumerate() {
+            let ref one = window[0];
+            let ref other = window[1];
+            let arrow = if one.children.borrow().contains(&other) {
+                "→" // \u{2192} RIGHTWARDS ARROW
+            } else {
+                "←" // \u{2190} RIGHTWARDS ARROW
+            };
+
+            if i == 0 {
+                try!(write!(f,
+                            "{} {} {}",
+                            one.identifier,
+                            arrow,
+                            other.identifier));
+            } else {
+                try!(write!(f, " {} {}", arrow, other.identifier));
+            }
+
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{Network, Variable};
@@ -245,6 +302,23 @@ mod test {
     }
 
     #[test]
+    fn concerning_paths() {
+        let network = rain_sprinker_example();
+        let paths = network.paths("season", "slippery");
+        assert_eq!(2, paths.len());
+        assert_eq!("season → sprinkler → wet → slippery",
+                   format!("{}", paths[0]));
+        assert_eq!("season → rain → wet → slippery",
+                   format!("{}", paths[1]));
+        let counterpaths = network.paths("slippery", "season");
+        assert_eq!("slippery ← wet ← sprinkler ← season",
+                   format!("{}", counterpaths[0]));
+        assert_eq!("slippery ← wet ← rain ← season",
+                   format!("{}", counterpaths[1]));
+        assert_eq!(2, counterpaths.len());
+    }
+
+    #[test]
     fn concerning_linkage() {
         let network = rain_sprinker_example();
         let season = network.get_variable("season").unwrap();
@@ -262,6 +336,17 @@ mod test {
                             .unwrap()
                             .identifier);
         }
+    }
+
+    #[test]
+    fn concerning_descendants() {
+        let network = rain_sprinker_example();
+        let rain = network.get_variable("rain").unwrap();
+        let rain_descendants = rain.descendants();
+        assert_eq!(vec!["wet", "slippery"],
+                   rain_descendants.iter()
+                                   .map(|v| &v.identifier)
+                                   .collect::<Vec<_>>());
     }
 
 }
