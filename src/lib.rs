@@ -135,6 +135,17 @@ impl Network {
         Network::collect_paths(start, end, vec![], &mut paths);
         paths
     }
+
+    pub fn d_separated(&self, start_identifier: &str, end_identifier: &str,
+        given_identifiers: &[&str])
+                       -> bool {
+        let givens = given_identifiers.iter()
+                                      .map(|&i| self.get_variable(i).unwrap())
+                                      .collect::<Vec<_>>();
+        self.paths(start_identifier, end_identifier)
+            .iter()
+            .all(|p| p.d_separated(&givens))
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -316,6 +327,28 @@ mod test {
         assert_eq!("slippery ← wet ← rain ← season",
                    format!("{}", counterpaths[1]));
         assert_eq!(2, counterpaths.len());
+    }
+
+    #[test]
+    fn concerning_d_separation() {
+        let network = rain_sprinker_example();
+        // _Causality_ §1.2.3
+        //
+        // "In Figure 1.2, X = {X₂} and Y = {X₃} are d-separated by Z = {X₁},
+        // because both paths connecting {X₂} and {X₃} are blocked by Z. The
+        // path X₂ ← X₁ → X₃ is blocked because it is a fork in which the
+        // middle node X₁ is in Z, while the path X₂ → X₄ ← X₃ is blocked
+        // because it is an inverted fork in which the middle node X₄ and all
+        // its descendants are outside Z."
+        assert!(network.d_separated("rain", "sprinkler", &["season"]));
+        // "However, X and Y are not d-separated by the the set Z′, since X₅,
+        // as descendant of the middle node X₄, is in Z′. Metaphorically,
+        // learning the value of the consequence X₅ renders its causes X₂ and
+        // X₃ dependent, as if a pathway were opened along the arrows
+        // converging at X₄."
+        assert!(!network.d_separated("rain",
+                                     "sprinkler",
+                                     &["season", "slippery"]));
     }
 
     #[test]
