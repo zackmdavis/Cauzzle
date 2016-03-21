@@ -213,11 +213,11 @@ impl Segment {
 
     }
 
-    fn center_in_givens(&self, givens: &[Rc<Variable>]) -> bool {
+    fn center_in(&self, givens: &[Rc<Variable>]) -> bool {
         givens.contains(&self.nodes.1)
     }
 
-    fn center_descendant_in_givens(&self, givens: &[Rc<Variable>]) -> bool {
+    fn center_descendant_in(&self, givens: &[Rc<Variable>]) -> bool {
         for descendant in self.nodes.1.descendants() {
             if givens.contains(&descendant) {
                 return true;
@@ -236,13 +236,13 @@ impl Path {
             let segment = Segment::new(window);
             match segment.topology {
                 SegmentTopology::Chain | SegmentTopology::Fork => {
-                    if segment.center_in_givens(givens) {
+                    if segment.center_in(givens) {
                         return true;
                     }
                 }
                 SegmentTopology::Collider => {
-                    if !segment.center_in_givens(givens) &&
-                       !segment.center_descendant_in_givens(givens) {
+                    if !segment.center_in(givens) &&
+                       !segment.center_descendant_in(givens) {
                         return true;
                     }
                 }
