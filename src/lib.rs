@@ -6,23 +6,23 @@ use std::mem;
 use std::rc::{Rc, Weak};
 
 
-struct Variable {
+struct NaiveVariable {
     identifier: String,
     // Each variable should be able to have its own set of possible states. For
     // the moment, just use an opaque byte, because we should get the basics
     // down before we take on the struggle of wrangling trait objects.
     states: Vec<u8>,
-    parents: RefCell<Vec<Weak<Variable>>>,
-    children: RefCell<Vec<Rc<Variable>>>,
+    parents: RefCell<Vec<Weak<NaiveVariable>>>,
+    children: RefCell<Vec<Rc<NaiveVariable>>>,
     // The conditional probability table is represented as a map of a vector of
     // parent states to probabilities.
     table: RefCell<HashMap<Vec<u8>, Vec<f64>>>,
 }
 
 // implements PartialEq, Debug
-impl Variable {
-    fn create(identifier: &str, states: &[u8]) -> Rc<Variable> {
-        Rc::new(Variable {
+impl NaiveVariable {
+    fn create(identifier: &str, states: &[u8]) -> Rc<NaiveVariable> {
+        Rc::new(NaiveVariable {
             identifier: identifier.to_owned(),
             states: states.to_vec(),
             parents: RefCell::new(Vec::new()),
@@ -31,7 +31,7 @@ impl Variable {
         })
     }
 
-    fn collect_descendants(&self, descendants: &mut Vec<Rc<Variable>>) {
+    fn collect_descendants(&self, descendants: &mut Vec<Rc<NaiveVariable>>) {
         for child in self.children.borrow().iter() {
             if !descendants.contains(child) {
                 descendants.push(child.clone());
@@ -40,23 +40,23 @@ impl Variable {
         }
     }
 
-    pub fn descendants(&self) -> Vec<Rc<Variable>> {
+    pub fn descendants(&self) -> Vec<Rc<NaiveVariable>> {
         let mut descendants = Vec::new();
         self.collect_descendants(&mut descendants);
         descendants
     }
 }
 
-impl cmp::PartialEq for Variable {
-    fn eq(&self, other: &Variable) -> bool {
+impl cmp::PartialEq for NaiveVariable {
+    fn eq(&self, other: &NaiveVariable) -> bool {
         self.identifier == other.identifier
     }
 }
 
-impl fmt::Debug for Variable {
+impl fmt::Debug for NaiveVariable {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f,
-               "Variable {{ identifier: {:?}, states: {:?}, \
+               "NaiveVariable {{ identifier: {:?}, states: {:?}, \
                 parents: (omitted), children: {:?}, \
                 table: (omitted) }}",
                self.identifier,
@@ -70,14 +70,14 @@ impl fmt::Debug for Variable {
 }
 
 #[derive(Clone, Debug)]
-struct Network(Vec<Rc<Variable>>);
+struct Network(Vec<Rc<NaiveVariable>>);
 
 impl Network {
-    pub fn new(nodes: &[Rc<Variable>]) -> Self {
-        Network(nodes.iter().cloned().collect::<Vec<Rc<Variable>>>())
+    pub fn new(nodes: &[Rc<NaiveVariable>]) -> Self {
+        Network(nodes.iter().cloned().collect::<Vec<Rc<NaiveVariable>>>())
     }
 
-    pub fn get_variable(&self, identifier: &str) -> Option<Rc<Variable>> {
+    pub fn get_variable(&self, identifier: &str) -> Option<Rc<NaiveVariable>> {
         self.0
             .iter()
             .skip_while(|&n| n.identifier != identifier)
@@ -94,8 +94,8 @@ impl Network {
         child.parents.borrow_mut().push(Rc::downgrade(&parent));
     }
 
-    fn collect_paths(at: Rc<Variable>, to: Rc<Variable>,
-        mut journey: Vec<Rc<Variable>>, paths: &mut Vec<Path>) {
+    fn collect_paths(at: Rc<NaiveVariable>, to: Rc<NaiveVariable>,
+        mut journey: Vec<Rc<NaiveVariable>>, paths: &mut Vec<Path>) {
         for step in journey.iter() {
             if at == *step {
                 // going in circles ...
@@ -157,12 +157,12 @@ enum SegmentTopology {
 
 #[derive(Clone, Debug)]
 struct Segment {
-    nodes: (Rc<Variable>, Rc<Variable>, Rc<Variable>),
+    nodes: (Rc<NaiveVariable>, Rc<NaiveVariable>, Rc<NaiveVariable>),
     topology: SegmentTopology,
 }
 
 impl Segment {
-    fn new(subpath: &[Rc<Variable>]) -> Self {
+    fn new(subpath: &[Rc<NaiveVariable>]) -> Self {
         if subpath.len() != 3 {
             panic!("a segment must have exactly three nodes");
         }
@@ -213,11 +213,11 @@ impl Segment {
 
     }
 
-    fn center_in(&self, givens: &[Rc<Variable>]) -> bool {
+    fn center_in(&self, givens: &[Rc<NaiveVariable>]) -> bool {
         givens.contains(&self.nodes.1)
     }
 
-    fn center_descendant_in(&self, givens: &[Rc<Variable>]) -> bool {
+    fn center_descendant_in(&self, givens: &[Rc<NaiveVariable>]) -> bool {
         for descendant in self.nodes.1.descendants() {
             if givens.contains(&descendant) {
                 return true;
@@ -228,10 +228,10 @@ impl Segment {
 }
 
 #[derive(Debug)]
-struct Path(Vec<Rc<Variable>>);
+struct Path(Vec<Rc<NaiveVariable>>);
 
 impl Path {
-    fn d_separated(&self, givens: &[Rc<Variable>]) -> bool {
+    fn d_separated(&self, givens: &[Rc<NaiveVariable>]) -> bool {
         for window in self.0.windows(3) {
             let segment = Segment::new(window);
             match segment.topology {
@@ -280,15 +280,15 @@ impl fmt::Display for Path {
 
 #[cfg(test)]
 mod test {
-    use super::{Network, Variable};
+    use super::{Network, NaiveVariable};
 
     // the example network from _Causality_ §1.2
     fn rain_sprinker_example() -> Network {
-        let season = Variable::create("season", &[1, 2, 3, 4]);
-        let sprinkler = Variable::create("sprinkler", &[0, 1]);
-        let rain = Variable::create("rain", &[1, 2, 3]);
-        let wet = Variable::create("wet", &[1, 2, 3]);
-        let slippery = Variable::create("slippery", &[1, 2, 3]);
+        let season = NaiveVariable::create("season", &[1, 2, 3, 4]);
+        let sprinkler = NaiveVariable::create("sprinkler", &[0, 1]);
+        let rain = NaiveVariable::create("rain", &[1, 2, 3]);
+        let wet = NaiveVariable::create("wet", &[1, 2, 3]);
+        let slippery = NaiveVariable::create("slippery", &[1, 2, 3]);
         let nodes = vec![season.clone(),
                          rain.clone(),
                          sprinkler.clone(),
