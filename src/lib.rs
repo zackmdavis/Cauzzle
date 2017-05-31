@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[macro_use] extern crate log;
 extern crate petgraph;
 extern crate rand;
@@ -6,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use petgraph::{Directed, Direction, Graph};
-use petgraph::graph::{NodeIndex, EdgeIndex};
+use petgraph::graph::NodeIndex;
 use petgraph::visit::Topo;
 
 
@@ -15,6 +17,32 @@ enum VariableState {
     Categorical(usize),
     Integer(isize),
     Float(f64)
+}
+
+impl VariableState {
+    fn categorical(&self) -> usize {
+        match *self {
+            VariableState::Categorical(c) => c,
+            s @ _ => panic!("expected variable state to be categorical, \
+                             got {:?}", s)
+        }
+    }
+
+    fn integer(&self) -> isize {
+        match *self {
+            VariableState::Integer(i) => i,
+            s @ _ => panic!("expected variable state to be integral, \
+                             got {:?}", s)
+        }
+    }
+
+    fn float(&self) -> f64 {
+        match *self {
+            VariableState::Float(f) => f,
+            s @ _ => panic!("expected variable state to be a float, \
+                             got {:?}", s)
+        }
+    }
 }
 
 // implements Debug
@@ -43,43 +71,54 @@ impl fmt::Debug for Variable {
 }
 
 #[derive(Debug)]
-struct StructuralCausalModel(Graph<Variable, (), Directed>);
+struct StructuralCausalModel {
+    identifiers: HashMap<String, NodeIndex>,
+    graph: Graph<Variable, (), Directed>,
+}
 
 impl StructuralCausalModel {
     fn new() -> Self {
-        StructuralCausalModel(Graph::new())
+        StructuralCausalModel {
+            identifiers: HashMap::new(),
+            graph: Graph::new()
+        }
     }
 
-    fn add_variable(&mut self, variable: Variable) -> NodeIndex {
-        self.0.add_node(variable)
+    pub fn add_variable(&mut self, variable: Variable) {
+        let identifier = variable.identifier.clone();
+        let index = self.graph.add_node(variable);
+        self.identifiers.insert(identifier, index);
     }
 
-    fn add_arrow(&mut self,
-                 parent_index: NodeIndex,
-                 child_index: NodeIndex) -> EdgeIndex {
-        self.0.add_edge(parent_index, child_index, ())
+    pub fn get_variable(&self, identifier: &str) -> Option<&Variable> {
+        self.graph.node_weight(self.identifiers[identifier])
+    }
+
+    pub fn add_arrow(&mut self, parent: &str, child: &str) {
+        self.graph.add_edge(self.identifiers[parent],
+                            self.identifiers[child], ());
     }
 
     fn parent_states(&self, index: NodeIndex) -> Vec<VariableState> {
-        self.0.neighbors_directed(index, Direction::Incoming)
-            .map(|j| self.0.node_weight(j).expect("parent exists")
+        self.graph.neighbors_directed(index, Direction::Incoming)
+            .map(|j| self.graph.node_weight(j).expect("parent exists")
                  .state.expect("parent state must be set"))
             .collect()
     }
 
     fn evaluate_variable(&mut self, index: NodeIndex) {
         let parent_states = self.parent_states(index);
-        let state = (self.0.node_weight(index)
+        let state = (self.graph.node_weight(index)
                      .expect("variable should exist").structure)(&parent_states);
         info!("setting variable {:?} state to {:?} based on parent states {:?}",
               index, state, parent_states);
-        self.0.node_weight_mut(index)
+        self.graph.node_weight_mut(index)
             .expect("variable should exist").state = Some(state);
     }
 
-    fn evaluate(&mut self) {
-        let mut topological_visitor = Topo::new(&self.0);
-        while let Some(next_index) = topological_visitor.next(&self.0) {
+    pub fn evaluate(&mut self) {
+        let mut topological_visitor = Topo::new(&self.graph);
+        while let Some(next_index) = topological_visitor.next(&self.graph) {
             self.evaluate_variable(next_index);
         }
     }
@@ -127,12 +166,24 @@ mod tests {
 
         // set up the graph
         let mut model = StructuralCausalModel::new();
-        let one_penny_index = model.add_variable(one_penny);
-        let another_penny_index = model.add_variable(another_penny);
-        let matching_index = model.add_variable(matching);
-        model.add_arrow(one_penny_index, matching_index);
-        model.add_arrow(another_penny_index, matching_index);
+        model.add_variable(one_penny);
+        model.add_variable(another_penny);
+        model.add_variable(matching);
+        model.add_arrow("penny A", "matching");
+        model.add_arrow("penny B", "matching");
 
         model.evaluate();
+
+        let first_flip = model.get_variable("penny A")
+            .expect("variable should exist")
+            .state.expect("state should be set").categorical();
+        let second_flip = model.get_variable("penny B")
+            .expect("variable should exist")
+            .state.expect("state should be set").categorical();
+        let parity_result = model.get_variable("matching")
+            .expect("variable should exist")
+            .state.expect("state should be set").categorical();
+
+        assert_eq!(parity_result, (first_flip + second_flip) % 2);
     }
 }
