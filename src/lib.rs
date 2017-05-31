@@ -22,6 +22,7 @@ enum VariableState {
     Float(f64)
 }
 
+// implements Debug
 struct Variable {
     identifier: String,
     state: Option<VariableState>,
@@ -38,6 +39,15 @@ impl Variable {
     }
 }
 
+impl fmt::Debug for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f,
+               "Variable {{ identifier: {:?}, state: {:?}, structure: @{:p} }}",
+               self.identifier, self.state, &self.structure)
+    }
+}
+
+#[derive(Debug)]
 struct StructuralCausalModel(Graph<Variable, (), Directed>);
 
 impl StructuralCausalModel {
@@ -103,7 +113,7 @@ mod tests {
         for parent in parents {
             match parent {
                 &VariableState::Categorical(i) => {
-                    parity_bit += i % 2;
+                    parity_bit = (parity_bit + i) % 2;
                 }
                 s @ _ => panic!("unexpectedly non-categorical \
                                  variable state {:?}", s)
