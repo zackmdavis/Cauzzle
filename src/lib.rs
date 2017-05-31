@@ -1,5 +1,6 @@
 #![allow(dead_code)] // for the moment
 
+#[macro_use] extern crate log;
 extern crate petgraph;
 extern crate rand;
 
@@ -65,6 +66,8 @@ impl StructuralCausalModel {
         let parent_states = self.parent_states(index);
         let state = (self.0.node_weight(index)
                      .expect("variable should exist").structure)(&parent_states);
+        info!("setting variable {:?} state to {:?} based on parent states {:?}",
+              index, state, parent_states);
         self.0.node_weight_mut(index)
             .expect("variable should exist").state = Some(state);
     }
