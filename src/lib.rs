@@ -49,6 +49,8 @@ impl VariableState {
 struct Variable {
     identifier: String,
     state: Option<VariableState>,
+    // XXX: the argument is going to have to be &[(String, VariableState)] to
+    // disambiguate between parents (can't depend on graph order)
     structure: Box<Fn(&[VariableState]) -> VariableState>
 }
 
