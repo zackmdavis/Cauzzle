@@ -49,14 +49,12 @@ impl VariableState {
 struct Variable {
     identifier: String,
     state: Option<VariableState>,
-    // XXX: the argument is going to have to be &[(String, VariableState)] to
-    // disambiguate between parents (can't depend on graph order)
-    structure: Box<Fn(&[VariableState]) -> VariableState>
+    structure: Box<Fn(&[(String, VariableState)]) -> VariableState>
 }
 
 impl Variable {
     fn new<I: ToString>(identifier: I, state: Option<VariableState>,
-                        structure: Box<Fn(&[VariableState]) -> VariableState>)
+                        structure: Box<Fn(&[(String, VariableState)]) -> VariableState>)
                         -> Self {
         Variable { identifier: identifier.to_string(),
                    state: state,
@@ -101,19 +99,20 @@ impl StructuralCausalModel {
                             self.identifiers[child], ());
     }
 
-    fn parent_states(&self, index: NodeIndex) -> Vec<VariableState> {
+    fn parents(&self, index: NodeIndex) -> Vec<(String, VariableState)> {
         self.graph.neighbors_directed(index, Direction::Incoming)
-            .map(|j| self.graph.node_weight(j).expect("parent exists")
-                 .state.expect("parent state must be set"))
+            .map(|j| self.graph.node_weight(j).expect("parent exists"))
+            .map(|v| (v.identifier.clone(),
+                      v.state.expect("parent state must be set")))
             .collect()
     }
 
     fn evaluate_variable(&mut self, index: NodeIndex) {
-        let parent_states = self.parent_states(index);
+        let parents = self.parents(index);
         let state = (self.graph.node_weight(index)
-                     .expect("variable should exist").structure)(&parent_states);
+                     .expect("variable should exist").structure)(&parents);
         info!("setting variable {:?} state to {:?} based on parent states {:?}",
-              index, state, parent_states);
+              index, state, parents);
         self.graph.node_weight_mut(index)
             .expect("variable should exist").state = Some(state);
     }
@@ -136,7 +135,7 @@ mod tests {
     const HEADS: VariableState = VariableState::Categorical(0);
     const TAILS: VariableState = VariableState::Categorical(1);
 
-    fn coinflip(_dummy: &[VariableState]) -> VariableState {
+    fn coinflip(_dummy: &[(String, VariableState)]) -> VariableState {
         if random::<f64>() < 0.5 {
             HEADS
         } else {
@@ -144,11 +143,11 @@ mod tests {
         }
     }
 
-    fn parity(parents: &[VariableState]) -> VariableState {
+    fn parity(parents: &[(String, VariableState)]) -> VariableState {
         let mut parity_bit = 0;
-        for parent in parents {
+        for &(_, parent) in parents {
             match parent {
-                &VariableState::Categorical(i) => {
+                VariableState::Categorical(i) => {
                     parity_bit = (parity_bit + i) % 2;
                 }
                 s @ _ => panic!("unexpectedly non-categorical \
