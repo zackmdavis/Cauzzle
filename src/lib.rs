@@ -125,6 +125,14 @@ impl StructuralCausalModel {
             self.evaluate_variable(next_index);
         }
     }
+
+    #[allow(unused_variables)]
+    pub fn d_separated(from: &str, to: &str, conditional_on: &[&str]) {
+        // See Algorithm 3.1 in §3.3.3 of _Probabilistic Graphical Models:
+        // Principles and Techniques_ by Daphne Koller and some other guy
+
+        // TODO
+    }
 }
 
 #[cfg(test)]
