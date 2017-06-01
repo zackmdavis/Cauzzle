@@ -99,7 +99,7 @@ impl StructuralCausalModel {
                             self.identifiers[child], ());
     }
 
-    fn parents(&self, index: NodeIndex) -> Vec<(String, VariableState)> {
+    fn parent_states(&self, index: NodeIndex) -> Vec<(String, VariableState)> {
         self.graph.neighbors_directed(index, Direction::Incoming)
             .map(|j| self.graph.node_weight(j).expect("parent exists"))
             .map(|v| (v.identifier.clone(),
@@ -107,12 +107,14 @@ impl StructuralCausalModel {
             .collect()
     }
 
+
+
     fn evaluate_variable(&mut self, index: NodeIndex) {
-        let parents = self.parents(index);
+        let parent_states = self.parent_states(index);
         let state = (self.graph.node_weight(index)
-                     .expect("variable should exist").structure)(&parents);
+                     .expect("variable should exist").structure)(&parent_states);
         info!("setting variable {:?} state to {:?} based on parent states {:?}",
-              index, state, parents);
+              index, state, parent_states);
         self.graph.node_weight_mut(index)
             .expect("variable should exist").state = Some(state);
     }
