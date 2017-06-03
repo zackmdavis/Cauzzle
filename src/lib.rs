@@ -214,7 +214,7 @@ impl StructuralCausalModel {
             .collect::<Vec<_>>();
         let reachable_froms = self.d_reachable(from_index,
                                                conditional_on_indices.as_slice());
-        reachable_froms.contains(&to_index)
+        !reachable_froms.contains(&to_index)
     }
 
 }
@@ -281,4 +281,66 @@ mod tests {
 
         assert_eq!(parity_result, (first_flip + second_flip) % 2);
     }
+
+    fn integer_sum(parents: &[(String, VariableState)]) -> VariableState {
+        let mut total = 0;
+        for &(_, parent) in parents {
+            match parent {
+                VariableState::Integer(i) => {
+                    total += i
+                }
+                s @ _ => panic!("unexpectedly non-integer \
+                                 variable state {:?}", s)
+            };
+        }
+        VariableState::Integer(total)
+    }
+
+    // the example network from _Causality_ §1.2
+    fn rain_sprinkler_example() -> StructuralCausalModel {
+        let season = Variable::new("season", Some(VariableState::Integer(1)),
+                                   Box::new(integer_sum));
+        let sprinkler = Variable::new("sprinkler", None, Box::new(integer_sum));
+        let rain = Variable::new("rain", None, Box::new(integer_sum));
+        let wet = Variable::new("wet", None, Box::new(integer_sum));
+        let slippery = Variable::new("slippery", None, Box::new(integer_sum));
+
+        let mut model = StructuralCausalModel::new();
+        model.add_variable(season);
+        model.add_variable(sprinkler);
+        model.add_variable(rain);
+        model.add_variable(wet);
+        model.add_variable(slippery);
+        model.add_arrow("season", "sprinkler");
+        model.add_arrow("season", "rain");
+        model.add_arrow("sprinkler", "wet");
+        model.add_arrow("rain", "wet");
+        model.add_arrow("wet", "slippery");
+
+        model.evaluate();
+        model
+    }
+
+    #[test]
+    fn concerning_d_separation() {
+        let model = rain_sprinkler_example();
+        // _Causality_ §1.2.3
+        //
+        // "In Figure 1.2, X = {X₂} and Y = {X₃} are d-separated by Z = {X₁},
+        // because both paths connecting {X₂} and {X₃} are blocked by Z. The
+        // path X₂ ← X₁ → X₃ is blocked because it is a fork in which the
+        // middle node X₁ is in Z, while the path X₂ → X₄ ← X₃ is blocked
+        // because it is an inverted fork in which the middle node X₄ and all
+        // its descendants are outside Z."
+        assert!(model.d_separated("rain", "sprinkler", &["season"]));
+        // "However, X and Y are not d-separated by the the set Z′, since X₅,
+        // as descendant of the middle node X₄, is in Z′. Metaphorically,
+        // learning the value of the consequence X₅ renders its causes X₂ and
+        // X₃ dependent, as if a pathway were opened along the arrows
+        // converging at X₄."
+        assert!(!model.d_separated("rain",
+                                   "sprinkler",
+                                   &["season", "slippery"]));
+    }
+
 }
