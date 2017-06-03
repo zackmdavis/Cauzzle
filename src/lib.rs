@@ -107,8 +107,6 @@ impl StructuralCausalModel {
             .collect()
     }
 
-
-
     fn evaluate_variable(&mut self, index: NodeIndex) {
         let parent_states = self.parent_states(index);
         let state = (self.graph.node_weight(index)
@@ -126,13 +124,99 @@ impl StructuralCausalModel {
         }
     }
 
-    #[allow(unused_variables)]
-    pub fn d_separated(from: &str, to: &str, conditional_on: &[&str]) {
-        // See Algorithm 3.1 in §3.3.3 of _Probabilistic Graphical Models:
-        // Principles and Techniques_ by Daphne Koller and some other guy
+    fn d_reachable(&self, from: NodeIndex, conditional_on: &[NodeIndex]) -> Vec<NodeIndex> {
+        // See Algorithm 3.1 in §3.3.3 of _Daphne Koller and the Methods of
+        // Rationality; Or, Probabilistic Graphical Models: Principles and
+        // Techniques_, by Daphne Koller and the other guy
 
-        // TODO
+        // First, get the ancestors of the conditioned-on variables (which can
+        // unblock colliders). It's simplest to work with "raw" petgraph node
+        // indices.
+        let mut z_visitation_queue = conditional_on.to_vec();
+        let mut preconditional_on = conditional_on.to_vec();
+        while !z_visitation_queue.is_empty() {
+            let node_index = z_visitation_queue.pop()
+                .expect("ex hypothesi, queue is not empty");
+            if !preconditional_on.contains(&node_index) {
+                z_visitation_queue.extend(
+                    self.graph.neighbors_directed(node_index,
+                                                  Direction::Incoming));
+            }
+            preconditional_on.push(node_index);
+        }
+
+        // Then, breadth-first-search for d-connected paths from `from` to
+        // `to`. Because blockedness depends on arrow orientation, it's
+        // actually node-direction pairs that we can safely avoid the expense
+        // of re-visiting, not nodes themselves.
+        let mut visitation_queue = vec![(from, Direction::Outgoing)];
+        let mut been_there = Vec::new();
+        let mut reachable = Vec::new();
+        while !visitation_queue.is_empty() {
+            let (node_index, direction) = visitation_queue.pop()
+                .expect("ex hypothesi, queue is not empty");
+
+            if !been_there.contains(&(node_index, direction)) {
+                if !conditional_on.contains(&node_index) {
+                    reachable.push(node_index);
+                }
+                been_there.push((node_index, direction));
+
+                if direction == Direction::Incoming {
+                    // If we got to this node via an incoming arrow, then it's
+                    // a collider with respect to its (other) parents (→·←)
+                    if preconditional_on.contains(&node_index) {
+                        // (which means the path continues if it is, or is an
+                        // ancestor of, a variable we're conditioning on),
+                        for parent_index in self.graph
+                            .neighbors_directed(node_index, Direction::Incoming) {
+                                visitation_queue.push((parent_index,
+                                                       Direction::Outgoing));
+                        }
+                    }
+                    // and a chain with respect to its children (→·→).
+                    if !conditional_on.contains(&node_index) {
+                        for child_index in self.graph
+                            .neighbors_directed(node_index, Direction::Outgoing) {
+                                visitation_queue.push((child_index,
+                                                       Direction::Incoming));
+                        }
+                    }
+
+                } else if direction == Direction::Outgoing {
+                    // If we got to this node via an outgoing (backwards)
+                    // arrow, then it's a chain with respect to its parents
+                    // (←·←), and a fork with respect to its children (←·→).
+                    if !conditional_on.contains(&node_index) {
+                        for parent_index in self.graph
+                            .neighbors_directed(node_index, Direction::Incoming) {
+                                visitation_queue.push((parent_index,
+                                                       Direction::Outgoing));
+                        }
+                        for child_index in self.graph
+                            .neighbors_directed(node_index, Direction::Outgoing) {
+                                visitation_queue.push((child_index,
+                                                       Direction::Incoming));
+                        }
+                    }
+                }
+            }
+        }
+        reachable
     }
+
+    pub fn d_separated(&self, from: &str, to: &str, conditional_on: &[&str]) -> bool {
+        let from_index = self.identifiers[from];
+        let to_index = self.identifiers[to];
+        let conditional_on_indices = conditional_on.iter()
+            .map(|ident| *self.identifiers.get(*ident)
+                 .expect("conditioning variables should exist"))
+            .collect::<Vec<_>>();
+        let reachable_froms = self.d_reachable(from_index,
+                                               conditional_on_indices.as_slice());
+        reachable_froms.contains(&to_index)
+    }
+
 }
 
 #[cfg(test)]
