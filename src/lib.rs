@@ -64,9 +64,10 @@ impl Variable {
 
 impl fmt::Debug for Variable {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        write!(f,
-               "Variable {{ identifier: {:?}, state: {:?}, structure: @{:p} }}",
-               self.identifier, self.state, &self.structure)
+        f.debug_struct("Variable")
+            .field("identifier", &self.identifier)
+            .field("state", &self.state)
+            .finish()
     }
 }
 
