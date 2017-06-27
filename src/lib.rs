@@ -4,19 +4,22 @@
 extern crate petgraph;
 extern crate rand;
 
+use std::clone::Clone;
 use std::collections::HashMap;
 use std::fmt;
+use std::mem;
 
 use petgraph::{Directed, Direction, Graph};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::Topo;
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 enum VariableState {
     Categorical(usize),
     Integer(isize),
-    Float(f64)
+    // TODO: buy or make floats with Eq (NaN is fake)
+    // Float(f64)
 }
 
 impl VariableState {
@@ -36,6 +39,7 @@ impl VariableState {
         }
     }
 
+    #[cfg(TODO_support_floating_point_variables)]
     fn float(&self) -> f64 {
         match *self {
             VariableState::Float(f) => f,
@@ -45,7 +49,7 @@ impl VariableState {
     }
 }
 
-// implements Debug
+// implements Clone, Debug
 struct Variable {
     identifier: String,
     state: Option<VariableState>,
@@ -71,7 +75,22 @@ impl fmt::Debug for Variable {
     }
 }
 
-#[derive(Debug)]
+impl Clone for Variable {
+    fn clone(&self) -> Self {
+        // XXX TODO FIXME WTF: function types implement Copy but not Clone
+        // (https://github.com/rust-lang/rust/issues/28229)?!
+        let structure: Box<Fn(&[(String, VariableState)]) -> VariableState> = unsafe {
+            mem::transmute_copy(&self.structure)
+        };
+        Variable {
+            identifier: self.identifier.clone(),
+            state: self.state.clone(),
+            structure: structure
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct StructuralCausalModel {
     identifiers: HashMap<String, NodeIndex>,
     graph: Graph<Variable, (), Directed>,
@@ -123,6 +142,32 @@ impl StructuralCausalModel {
         while let Some(next_index) = topological_visitor.next(&self.graph) {
             self.evaluate_variable(next_index);
         }
+    }
+
+    pub fn joint_distribution(self, trials: usize)
+                              -> (Vec<String>, HashMap<Vec<VariableState>, f64>) {
+        let mut variables = Vec::new();
+        for identifier in self.identifiers.keys() {
+            variables.push(identifier.clone());
+        }
+        let mut outcomes = HashMap::new();
+        for _ in 0..trials {
+            let mut world = self.clone();
+            world.evaluate();
+            let mut outcome = Vec::new();
+            for identifier in &variables {
+                let state = world.get_variable(&identifier)
+                    .expect("variable should exist")
+                    .state.expect("state should be set");
+                outcome.push(state);
+            }
+            *outcomes.entry(outcome).or_insert(0usize) += 1;
+        }
+        let mut distribution = HashMap::new();
+        for (outcome, frequency) in outcomes.into_iter() {
+            distribution.insert(outcome, (frequency as f64)/(trials as f64));
+        }
+        (variables, distribution)
     }
 
     fn d_reachable(&self, from: NodeIndex, conditional_on: &[NodeIndex]) -> Vec<NodeIndex> {
@@ -230,6 +275,22 @@ mod tests {
     const HEADS: VariableState = VariableState::Categorical(0);
     const TAILS: VariableState = VariableState::Categorical(1);
 
+    #[macro_use]
+    macro_rules! assert_eq_within_epsilon {
+        // crude edit of the canonical `assert_eq!`
+        ($left:expr, $right:expr, $epsilon:expr) => ({
+            match (&($left), &($right)) {
+                (left_val, right_val) => {
+                    if (*left_val - *right_val).abs() > $epsilon {
+                        panic!("assertion failed: left and right not within ε \
+                                (left: `{:?}`, right: `{:?}`)", left_val, right_val);
+                    }
+                }
+            }
+        })
+    }
+
+
     fn coinflip(_dummy: &[(String, VariableState)]) -> VariableState {
         if random::<f64>() < 0.5 {
             HEADS
@@ -281,6 +342,12 @@ mod tests {
             .state.expect("state should be set").categorical();
 
         assert_eq!(parity_result, (first_flip + second_flip) % 2);
+
+        let (_, distribution) = model.joint_distribution(10000);
+        println!("{:?}", distribution);
+        for (_, probability) in distribution {
+            assert_eq_within_epsilon!(0.25, probability, 0.01);
+        }
     }
 
     fn integer_sum(parents: &[(String, VariableState)]) -> VariableState {
